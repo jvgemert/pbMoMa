@@ -1,11 +1,16 @@
 from perceptual.filterbank import *
 
 import cv2
-import cv2.cv as cv
 
-
-import os, sys
-
+# determine what OpenCV version we are using
+try:
+    import cv2.cv as cv
+    USE_CV2 = True
+except ImportError:
+    # OpenCV 3.x does not have cv2.cv submodule
+    USE_CV2 = False
+    
+import sys
 import numpy as np
 
 from pylab import *
@@ -39,19 +44,29 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
 
     # get vid properties
     vidReader = cv2.VideoCapture(vidFname)
-    vidFrames = int(vidReader.get(cv.CV_CAP_PROP_FRAME_COUNT))    
-    width = int(vidReader.get(cv.CV_CAP_PROP_FRAME_WIDTH))
-    height = int(vidReader.get(cv.CV_CAP_PROP_FRAME_HEIGHT))
+    if USE_CV2:
+        # OpenCV 2.x interface
+        vidFrames = int(vidReader.get(cv.CV_CAP_PROP_FRAME_COUNT))    
+        width = int(vidReader.get(cv.CV_CAP_PROP_FRAME_WIDTH))
+        height = int(vidReader.get(cv.CV_CAP_PROP_FRAME_HEIGHT))
+        fps = int(vidReader.get(cv.CV_CAP_PROP_FPS))
+        func_fourcc = cv.CV_FOURCC
+    else:
+        # OpenCV 3.x interface
+        vidFrames = int(vidReader.get(cv2.CAP_PROP_FRAME_COUNT))    
+        width = int(vidReader.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(vidReader.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = int(vidReader.get(cv2.CAP_PROP_FPS))
+        func_fourcc = cv2.VideoWriter_fourcc
 
     print width, height, 
 
-    fps = int(vidReader.get(cv.CV_CAP_PROP_FPS))
     if np.isnan(fps):
         fps = 30
     print 'FPS:%d' % fps
 
     # video Writer
-    fourcc = cv.CV_FOURCC('M', 'J', 'P', 'G')
+    fourcc = func_fourcc('M', 'J', 'P', 'G')
     vidWriter = cv2.VideoWriter(vidFnameOut, fourcc, int(fps), (width,height), 1)
     print 'Writing:', vidFnameOut
 
@@ -70,7 +85,7 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
             # read frame
             _, im = vidReader.read()
                
-            if im == None:
+            if im is None:
                 # if unexpected, quit
                 break
 
