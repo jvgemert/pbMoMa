@@ -13,32 +13,15 @@ except ImportError:
 import sys
 import numpy as np
 
-from pylab import *
-
-import scipy.signal
-import scipy.fftpack
-
-from pyramid2arr import Pyramid2arr
+from pyr2arr import Pyramid2arr
+from temporal_filters import IdealFilterWindowed, ButterBandpassFilter
 
 
-def ideal_bandpass(data, fps, wl=1.5, wh=2.5, axis=0):
-    fft = scipy.fftpack.fft(data, axis=axis)
-    frequencies = scipy.fftpack.fftfreq(data.shape[0], d=1.0 / fps)    
-    boundLow = (np.abs(frequencies - wl)).argmin()
-    boundHigh = (np.abs(frequencies - wh)).argmin()
-    fft[:boundLow] = 0
-    fft[boundHigh:-boundHigh] = 0
-    fft[-boundLow:] = 0
-    frequencies[:boundLow] = 0
-    frequencies[boundHigh:-boundHigh] = 0
-    frequencies[-boundLow:] = 0
-    
-    return np.real( scipy.fftpack.ifft(fft, axis=axis) )
-
-def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsForBandPass, lowFreq, highFreq): 
+def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsForBandPass, lowFreq, highFreq):
 
     # initialize the steerable complex pyramid
     steer = Steerable(5)
+    pyArr = Pyramid2arr(steer)
 
     print "Reading:", vidFname,
 
@@ -59,11 +42,12 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
         fps = int(vidReader.get(cv2.CAP_PROP_FPS))
         func_fourcc = cv2.VideoWriter_fourcc
 
-    print width, height, 
-
     if np.isnan(fps):
         fps = 30
-    print 'FPS:%d' % fps
+
+    print ' %d frames' % vidFrames,
+    print ' (%d x %d)' % (width, height),
+    print ' FPS:%d' % fps
 
     # video Writer
     fourcc = func_fourcc('M', 'J', 'P', 'G')
@@ -75,6 +59,10 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
 
     # read video
     #print steer.height, steer.nbands
+
+    # setup temporal filter
+    filter = IdealFilterWindowed(windowSize, lowFreq, highFreq, fps=fpsForBandPass, outfun=lambda x: x[0])
+    #filter = ButterBandpassFilter(1, lowFreq, highFreq, fps=fpsForBandPass)
 
     print 'FrameNr:', 
     for frameNr in range( nrFrames + windowSize ):
@@ -99,29 +87,32 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
             # get coeffs for pyramid
             coeff = steer.buildSCFpyr(grayIm)
 
-            # on first frame: init rotating array to store the pyramid coeffs 
-            if frameNr ==0:
-                # store a sliding window of frames, where the pyramid is converted to 1d arrays for easy filtering  
-                pyArr = Pyramid2arr(steer, windowSize, coeff)
-                
             # add image pyramid to video array
-            pyArr.p2a(coeff)
+            # NOTE: on first frame, this will init rotating array to store the pyramid coeffs                 
+            arr = pyArr.p2a(coeff)
 
-        if frameNr >= windowSize-1:
+
+            phases = np.angle(arr)
+
+            # add to temporal filter
+            filter.update([phases])
+
+            # try to get filtered output to continue            
+            try:
+                filteredPhases = filter.next()
+            except StopIteration:
+                continue
+
             print '*',
-            # get the phases of the window
-            win_phases = pyArr.getPhases()
             
-            # filter the window
-            filteredPhases = ideal_bandpass(win_phases, fpsForBandPass, lowFreq, highFreq)
-               
-            # subtract the original response, add the magnified response
-            frameIndex = max(frameNr - nrFrames -1, 0)
+            # motion magnification
+            magnifiedPhases = (phases - filteredPhases) + filteredPhases*factor
             
-            magnifiedPhases = (win_phases[frameIndex,:] - filteredPhases[frameIndex,:]) + filteredPhases[frameIndex,:]*factor
+            # create new array
+            newArr = np.abs(arr) * np.exp(magnifiedPhases * 1j)
 
-            # creat coeffs     
-            newCoeff = pyArr.a2p(phases=magnifiedPhases) 
+            # create pyramid coeffs     
+            newCoeff = pyArr.a2p(newArr)
             
             # reconstruct pyramid
             out = steer.reconSCFpyr(newCoeff)
