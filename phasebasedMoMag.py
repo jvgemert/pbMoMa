@@ -88,9 +88,13 @@ def phaseBasedMagnify(vidFname, vidFnameOut, maxFrames, windowSize, factor, fpsF
             if im is None:
                 # if unexpected, quit
                 break
-
+			
             # convert to gray image
-            grayIm = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)        
+            if len(im.shape) > 2:
+                grayIm = cv2.cvtColor(im, cv2.COLOR_RGB2GRAY)
+            else:
+                # already a grayscale image?
+                grayIm = im
 
             # get coeffs for pyramid
             coeff = steer.buildSCFpyr(grayIm)
